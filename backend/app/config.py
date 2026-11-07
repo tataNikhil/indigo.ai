@@ -15,6 +15,7 @@ class Settings:
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     max_input_tokens: int = int(os.getenv("MAX_INPUT_TOKENS", "2000"))
+    reply_max_tokens: int = int(os.getenv("REPLY_MAX_TOKENS", "700"))
     cors_origins: tuple[str, ...] = tuple(
         origin.strip()
         for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
