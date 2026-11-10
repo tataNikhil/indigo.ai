@@ -3,14 +3,17 @@
 Week 1: /api/v1/ingest      -> structured classification (the firewall)
 Week 2: /api/v1/chat        -> classification + context-aware Markdown reply
 Week 3: /api/v1/sessions    -> session IDs and in-memory conversation history
+Week 4: production config   -> Postgres (Supabase) storage, CORS from env, deploy
 """
 
 import logging
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from instructor.core import InstructorRetryException
 from pydantic import ValidationError
 
@@ -31,8 +34,10 @@ from app.schemas.ingestion import (
 from app.services.firewall import Classifier, TokenBudgetExceededError, ingest
 from app.services.llm_service import LLMNotConfiguredError, classify_message
 from app.services.memory_store import Session, SessionNotFoundError, SessionStore
+from app.services.postgres_store import DatabaseUnavailableError, PostgresSessionStore
 from app.services.response_service import GeneratedReply, generate_reply
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("indigo")
 
 # (new message, analysis of it, earlier turns) -> reply
@@ -41,6 +46,33 @@ ReplyGenerator = Callable[[str, IngestionResult, list[dict]], GeneratedReply]
 # How many earlier user messages the classifier sees to understand follow-ups.
 CLASSIFIER_CONTEXT_MESSAGES = 3
 
+def build_session_store() -> SessionStore | PostgresSessionStore:
+    """Postgres when DATABASE_URL is set (production), memory otherwise (local dev)."""
+    if settings.database_url:
+        logger.info("Chat history: Postgres")
+        return PostgresSessionStore(
+            settings.database_url,
+            max_messages=settings.max_history_messages,
+            ttl_seconds=settings.session_ttl_minutes * 60,
+        )
+    logger.info("Chat history: in memory (DATABASE_URL not set)")
+    return SessionStore(
+        max_messages=settings.max_history_messages,
+        ttl_seconds=settings.session_ttl_minutes * 60,
+        max_sessions=settings.max_sessions,
+    )
+
+
+session_store = build_session_store()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Allowed CORS origins: %s", ", ".join(settings.cors_origins) or "none")
+    yield
+    session_store.close()
+
+
 app = FastAPI(
     title="Indigo.ai - Enterprise Structured Ingestion Firewall",
     description=(
@@ -48,21 +80,26 @@ app = FastAPI(
         "(intent, risk profile, priority, token metadata), generates a "
         "context-aware Markdown reply, and remembers each conversation by session ID."
     ),
-    version="3.0.0",
+    version="4.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
+    allow_origin_regex=settings.cors_origin_regex,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
-session_store = SessionStore(
-    max_messages=settings.max_history_messages,
-    ttl_seconds=settings.session_ttl_minutes * 60,
-    max_sessions=settings.max_sessions,
-)
+
+@app.exception_handler(DatabaseUnavailableError)
+def database_unavailable(request: Request, exc: DatabaseUnavailableError) -> JSONResponse:
+    # Never leak connection strings or driver errors to the browser.
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Chat history is temporarily unavailable. Please try again shortly."},
+    )
 
 
 # Dependencies (overridden in tests so no real API calls are made)
@@ -123,11 +160,16 @@ def _to_session_info(session: Session) -> SessionInfo:
 
 @app.get("/health")
 def health(store: SessionStore = Depends(get_session_store)) -> dict:
+    """Render calls this to check the service is up. It always answers 200 so a
+    database hiccup doesn't make Render restart the app; the body says what's wrong."""
+    database_ok = store.ping()
     return {
-        "status": "ok",
+        "status": "ok" if database_ok else "degraded",
         "model": settings.groq_model,
         "llm_configured": bool(settings.groq_api_key),
-        "active_sessions": len(store),
+        "storage": store.kind,
+        "database": "ok" if database_ok else "unreachable",
+        "active_sessions": len(store) if database_ok else None,
     }
 
 

@@ -1,4 +1,8 @@
-"""Application settings loaded from environment variables / backend/.env."""
+"""Application settings loaded from environment variables / backend/.env.
+
+Locally these come from backend/.env. On Render they are set in the
+service's Environment tab - the .env file is never committed or deployed.
+"""
 
 import os
 from dataclasses import dataclass
@@ -7,6 +11,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _origins(raw: str) -> tuple[str, ...]:
+    # A trailing slash is a common copy-paste mistake ("https://x.vercel.app/")
+    # and would never match the browser's Origin header, so strip it.
+    return tuple(o.strip().rstrip("/") for o in raw.split(",") if o.strip())
 
 
 @dataclass(frozen=True)
@@ -21,11 +31,14 @@ class Settings:
     max_history_tokens: int = int(os.getenv("MAX_HISTORY_TOKENS", "3000"))
     session_ttl_minutes: int = int(os.getenv("SESSION_TTL_MINUTES", "60"))
     max_sessions: int = int(os.getenv("MAX_SESSIONS", "500"))
-    cors_origins: tuple[str, ...] = tuple(
-        origin.strip()
-        for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
-        if origin.strip()
-    )
+    # Week 4: production
+    # Empty -> chats are kept in memory (local dev). Set -> stored in Postgres/Supabase.
+    database_url: str = os.getenv("DATABASE_URL", "").strip()
+    # Comma-separated list of frontend URLs allowed to call this API.
+    cors_origins: tuple[str, ...] = _origins(os.getenv("CORS_ORIGINS", "http://localhost:5173"))
+    # Optional regex, e.g. to also allow Vercel preview deployments:
+    # https://indigo-ai-.*\.vercel\.app
+    cors_origin_regex: str | None = os.getenv("CORS_ORIGIN_REGEX") or None
 
 
 settings = Settings()

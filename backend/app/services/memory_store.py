@@ -11,7 +11,8 @@ Limits keep this safe to run on a small server:
 - each session keeps at most `max_messages` messages
 
 Everything lives in process memory, so a server restart clears all chats.
-Database persistence comes in a later week.
+This is the default for local development; in production (Week 4) the same
+interface is backed by Postgres - see postgres_store.py.
 """
 
 import threading
@@ -49,7 +50,27 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def trim_for_llm(messages: list[StoredMessage], max_tokens: int) -> list[dict]:
+    """Recent messages in the {"role", "content"} format the Groq API expects,
+    trimmed from the oldest end so they fit in `max_tokens`."""
+    selected: list[dict] = []
+    used = 0
+    for msg in reversed(messages):
+        cost = count_tokens(msg.content)
+        if used + cost > max_tokens:
+            break
+        selected.append({"role": msg.role, "content": msg.content})
+        used += cost
+    selected.reverse()
+    # The history should start with a user message, not a dangling reply.
+    if selected and selected[0]["role"] == "assistant":
+        selected.pop(0)
+    return selected
+
+
 class SessionStore:
+    kind = "memory"
+
     def __init__(
         self,
         max_messages: int = 20,
@@ -136,22 +157,13 @@ class SessionStore:
                 del session.messages[:drop]
 
     def history_for_llm(self, session_id: str, max_tokens: int) -> list[dict]:
-        """Recent messages in the {"role", "content"} format the Groq API expects,
-        trimmed from the oldest end so they fit in `max_tokens`."""
-        messages = self.get(session_id).messages
-        selected: list[dict] = []
-        used = 0
-        for msg in reversed(messages):
-            cost = count_tokens(msg.content)
-            if used + cost > max_tokens:
-                break
-            selected.append({"role": msg.role, "content": msg.content})
-            used += cost
-        selected.reverse()
-        # The history should start with a user message, not a dangling reply.
-        if selected and selected[0]["role"] == "assistant":
-            selected.pop(0)
-        return selected
+        return trim_for_llm(self.get(session_id).messages, max_tokens)
+
+    def ping(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        pass
 
     def __len__(self) -> int:
         with self._lock:
