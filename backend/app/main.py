@@ -1,10 +1,4 @@
-"""FastAPI entry point.
-
-Week 1: /api/v1/ingest      -> structured classification (the firewall)
-Week 2: /api/v1/chat        -> classification + context-aware Markdown reply
-Week 3: /api/v1/sessions    -> session IDs and in-memory conversation history
-Week 4: production config   -> Postgres (Supabase) storage, CORS from env, deploy
-"""
+"""FastAPI entry point."""
 
 import logging
 from collections.abc import Callable
@@ -40,14 +34,11 @@ from app.services.response_service import GeneratedReply, generate_reply
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("indigo")
 
-# (new message, analysis of it, earlier turns) -> reply
 ReplyGenerator = Callable[[str, IngestionResult, list[dict]], GeneratedReply]
 
-# How many earlier user messages the classifier sees to understand follow-ups.
 CLASSIFIER_CONTEXT_MESSAGES = 3
 
 def build_session_store() -> SessionStore | PostgresSessionStore:
-    """Postgres when DATABASE_URL is set (production), memory otherwise (local dev)."""
     if settings.database_url:
         logger.info("Chat history: Postgres")
         return PostgresSessionStore(
@@ -95,14 +86,13 @@ app.add_middleware(
 
 @app.exception_handler(DatabaseUnavailableError)
 def database_unavailable(request: Request, exc: DatabaseUnavailableError) -> JSONResponse:
-    # Never leak connection strings or driver errors to the browser.
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Chat history is temporarily unavailable. Please try again shortly."},
     )
 
 
-# Dependencies (overridden in tests so no real API calls are made)
+# overridden in tests
 def get_classifier() -> Classifier:
     return classify_message
 
@@ -160,8 +150,6 @@ def _to_session_info(session: Session) -> SessionInfo:
 
 @app.get("/health")
 def health(store: SessionStore = Depends(get_session_store)) -> dict:
-    """Render calls this to check the service is up. It always answers 200 so a
-    database hiccup doesn't make Render restart the app; the body says what's wrong."""
     database_ok = store.ping()
     return {
         "status": "ok" if database_ok else "degraded",
@@ -173,7 +161,7 @@ def health(store: SessionStore = Depends(get_session_store)) -> dict:
     }
 
 
-# ---------- Week 1: ingestion firewall ----------
+# Week 1: ingestion firewall
 
 
 @app.post("/api/v1/ingest", response_model=IngestionResult)
@@ -190,7 +178,7 @@ def ingest_batch(
     return BatchIngestionResult([_run(item, classifier) for item in batch.root])
 
 
-# ---------- Week 3: sessions ----------
+# Week 3: sessions
 
 
 @app.post("/api/v1/sessions", response_model=SessionInfo, status_code=status.HTTP_201_CREATED)
@@ -215,7 +203,7 @@ def delete_session(session_id: UUID, store: SessionStore = Depends(get_session_s
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ---------- Week 2 + 3: chat with memory ----------
+# Week 2 + 3: chat with memory
 
 
 @app.post("/api/v1/chat", response_model=ChatResponse)
@@ -225,7 +213,6 @@ def chat(
     reply_generator: ReplyGenerator = Depends(get_reply_generator),
     store: SessionStore = Depends(get_session_store),
 ) -> ChatResponse:
-    # Step 1: load earlier turns of this conversation (none for a new chat).
     session_id = str(request.session_id) if request.session_id else None
     history: list[dict] = []
     if session_id:
@@ -234,12 +221,9 @@ def chat(
         except SessionNotFoundError as exc:
             raise _session_not_found() from exc
 
-    # Step 2: Week 1 firewall on the new message. Earlier user messages help it
-    # understand follow-ups such as "how long will that take?".
     earlier = [m["content"] for m in history if m["role"] == "user"]
     analysis = _run(request, classifier, earlier[-CLASSIFIER_CONTEXT_MESSAGES:])
 
-    # Step 3: generate the reply with the analysis + full recent history.
     try:
         reply = reply_generator(request.message, analysis, history)
     except LLMNotConfiguredError as exc:
@@ -259,8 +243,7 @@ def chat(
         history_messages_used=len(history),
     )
 
-    # Step 4: only now save the turn, so a failed request never leaves a
-    # question without an answer in the history. New chats get their ID here.
+    # save only after a successful reply
     if session_id is None:
         session_id = store.create().session_id
     try:

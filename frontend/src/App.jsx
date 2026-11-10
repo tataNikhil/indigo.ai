@@ -10,9 +10,6 @@ const EXAMPLES = [
   "I'm locked out after entering the wrong password 3 times.",
 ];
 
-// Only the session ID is kept in the browser, so a page refresh can reload
-// the same conversation from the backend. The messages themselves live on
-// the server.
 const SESSION_KEY = "indigo.sessionId";
 
 function loadSavedSessionId() {
@@ -28,7 +25,7 @@ function saveSessionId(id) {
     if (id) localStorage.setItem(SESSION_KEY, id);
     else localStorage.removeItem(SESSION_KEY);
   } catch {
-    // storage blocked (private mode etc.) - the chat still works, just not across reloads
+    // ignore
   }
 }
 
@@ -51,15 +48,25 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const [error, setError] = useState("");
+  const [slow, setSlow] = useState(false);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+
+  // free Render instances can take a while to wake up
+  useEffect(() => {
+    if (!loading && !restoring) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(timer);
+  }, [loading, restoring]);
 
   function rememberSession(id) {
     setSessionId(id);
     saveSessionId(id);
   }
 
-  // On first load, continue the previous conversation if the server still has it.
   useEffect(() => {
     const saved = loadSavedSessionId();
     if (!saved) {
@@ -71,7 +78,10 @@ export default function App() {
         setSessionId(session.session_id);
         setMessages(session.messages.map(fromServer));
       })
-      .catch(() => saveSessionId(null)) // expired or server restarted: start fresh
+      .catch((err) => {
+        if (err.status === 404) saveSessionId(null);
+        else setError(err.message);
+      })
       .finally(() => setRestoring(false));
   }, []);
 
@@ -103,8 +113,6 @@ export default function App() {
       ]);
     } catch (err) {
       if (err.status === 404) {
-        // The server forgot this chat (expired / restarted). Drop the old ID so
-        // the next message starts a new conversation.
         rememberSession(null);
         setError("This conversation has expired. Send your message again to start a new chat.");
       } else {
@@ -124,13 +132,11 @@ export default function App() {
     setInput("");
     inputRef.current?.focus();
     if (oldId) {
-      // Free the memory on the server. If it already expired, that's fine.
       deleteSession(oldId).catch(() => {});
     }
   }
 
   function handleKeyDown(event) {
-    // Enter sends, Shift+Enter adds a new line.
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit(input);
@@ -200,6 +206,13 @@ export default function App() {
             <span className="dot" />
             <span className="dot" />
           </div>
+        )}
+
+        {slow && (
+          <p className="hint">
+            Waking up the server - the free hosting plan sleeps when idle, so the first request
+            can take up to a minute.
+          </p>
         )}
 
         {error && (

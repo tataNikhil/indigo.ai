@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: indigo-ai-backend
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL # Supabase "Session pooler" connection string
+        sync: false
+      - key: CORS_ORIGINS # your Vercel URL, e.g. https://indigo-ai.vercel.app
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: SESSION_TTL_MINUTES
+        value: "1440"

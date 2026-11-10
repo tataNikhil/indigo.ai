@@ -1,8 +1,4 @@
-"""Cheap, deterministic checks that run on every message, independent of the LLM.
-
-The LLM is told to treat the message as data, but we don't rely on that alone:
-if the text looks like it is trying to steer the model, we flag it ourselves.
-"""
+"""Cheap, deterministic checks that run on every message, independent of the LLM."""
 
 import re
 

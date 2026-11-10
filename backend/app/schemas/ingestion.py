@@ -28,11 +28,7 @@ PriorityLevel = Literal["low", "medium", "high", "urgent"]
 
 RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
-# Response-time targets are business rules, so they are set in code, not by the LLM.
 SLA_HOURS = {"urgent": 1, "high": 4, "medium": 24, "low": 72}
-
-
-# ---------- Request ----------
 
 
 class IngestionRequest(BaseModel):
@@ -48,17 +44,12 @@ class IngestionRequest(BaseModel):
 
 
 class BatchIngestionRequest(RootModel[list[IngestionRequest]]):
-    """A JSON array of requests, e.g. [{"message": "..."}, {"message": "..."}]."""
-
     @field_validator("root")
     @classmethod
     def batch_size(cls, items: list[IngestionRequest]) -> list[IngestionRequest]:
         if not 1 <= len(items) <= 10:
             raise ValueError("A batch must contain between 1 and 10 messages.")
         return items
-
-
-# ---------- What the LLM must return ----------
 
 
 class RiskProfile(BaseModel):
@@ -75,7 +66,6 @@ class RiskProfile(BaseModel):
 
     @model_validator(mode="after")
     def level_matches_flags(self) -> "RiskProfile":
-        # Cross-field rule: suspected fraud can never be rated low/medium risk.
         if "fraud_suspected" in self.flags and RISK_ORDER[self.level] < RISK_ORDER["high"]:
             raise ValueError("risk level must be 'high' or 'critical' when fraud is suspected")
         return self
@@ -89,8 +79,6 @@ class LLMPriority(BaseModel):
 
 
 class LLMClassification(BaseModel):
-    """Exact shape the model is forced to produce via Instructor."""
-
     model_config = ConfigDict(extra="forbid")
 
     intent: Intent
@@ -103,9 +91,6 @@ class LLMClassification(BaseModel):
     @classmethod
     def single_line_summary(cls, value: str) -> str:
         return " ".join(value.split())
-
-
-# ---------- API response ----------
 
 
 class PriorityParameters(LLMPriority):

@@ -1,9 +1,4 @@
-"""Prompt templates for the response generator.
-
-The base template is filled in at request time with whatever the Week 1
-firewall worked out about the message (intent, risk, priority, summary), so
-the model answers with that context instead of guessing from scratch.
-"""
+"""Prompt templates for the response generator."""
 
 from string import Template
 

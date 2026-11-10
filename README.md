@@ -22,3 +22,10 @@ Each chat gets its own session ID, and its messages are kept in memory on the se
 Recent history is sent to Groq with every new message, so the assistant can answer
 follow-up questions in context. Sessions are kept separate, and New Chat starts a
 fresh conversation.
+
+## Week 4 — Full-Stack Deployment
+
+The app runs in production: the React frontend on Vercel, the FastAPI backend on Render
+and chat history in a Supabase Postgres database, so conversations survive restarts.
+Secrets live in environment variables, CORS only allows the deployed frontend, and the
+app reports clear errors if the database is unreachable.

@@ -1,19 +1,4 @@
-"""In-memory chat history, one conversation per session ID.
-
-HTTP is stateless: every request arrives on its own and the LLM remembers
-nothing between calls. To make the assistant "remember", we keep each
-session's messages here and send the recent ones back to the model on every
-turn.
-
-Limits keep this safe to run on a small server:
-- sessions expire after `ttl_seconds` of inactivity
-- only `max_sessions` are kept; the least recently used is dropped first
-- each session keeps at most `max_messages` messages
-
-Everything lives in process memory, so a server restart clears all chats.
-This is the default for local development; in production (Week 4) the same
-interface is backed by Postgres - see postgres_store.py.
-"""
+"""In-memory chat history, one conversation per session ID."""
 
 import threading
 import time
@@ -51,8 +36,6 @@ def _now_iso() -> str:
 
 
 def trim_for_llm(messages: list[StoredMessage], max_tokens: int) -> list[dict]:
-    """Recent messages in the {"role", "content"} format the Groq API expects,
-    trimmed from the oldest end so they fit in `max_tokens`."""
     selected: list[dict] = []
     used = 0
     for msg in reversed(messages):
@@ -62,7 +45,6 @@ def trim_for_llm(messages: list[StoredMessage], max_tokens: int) -> list[dict]:
         selected.append({"role": msg.role, "content": msg.content})
         used += cost
     selected.reverse()
-    # The history should start with a user message, not a dangling reply.
     if selected and selected[0]["role"] == "assistant":
         selected.pop(0)
     return selected
@@ -83,10 +65,7 @@ class SessionStore:
         self.max_sessions = max_sessions
         self._clock = clock
         self._sessions: OrderedDict[str, Session] = OrderedDict()
-        # FastAPI runs sync endpoints in a thread pool, so guard the dict.
         self._lock = threading.Lock()
-
-    # ---------- internal helpers (call with the lock held) ----------
 
     def _purge_expired(self) -> None:
         now = self._clock()
@@ -105,8 +84,6 @@ class SessionStore:
         self._sessions.move_to_end(session_id)  # mark as most recently used
         return session
 
-    # ---------- public API ----------
-
     def create(self) -> Session:
         with self._lock:
             self._purge_expired()
@@ -123,7 +100,6 @@ class SessionStore:
     def get(self, session_id: str) -> Session:
         with self._lock:
             session = self._get(session_id)
-            # Return a copy so callers can't change stored state by accident.
             return Session(
                 session_id=session.session_id,
                 created_at=session.created_at,
@@ -142,8 +118,6 @@ class SessionStore:
         assistant_text: str,
         assistant_extra: dict | None = None,
     ) -> None:
-        """Save one user message and the reply together, so history never has
-        a question without its answer."""
         with self._lock:
             session = self._get(session_id)
             session.messages.append(StoredMessage("user", user_text, _now_iso()))
@@ -152,7 +126,6 @@ class SessionStore:
             )
             overflow = len(session.messages) - self.max_messages
             if overflow > 0:
-                # Drop whole turns (user + assistant) from the start.
                 drop = overflow + (overflow % 2)
                 del session.messages[:drop]
 

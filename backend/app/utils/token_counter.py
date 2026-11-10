@@ -1,9 +1,4 @@
-"""Local token estimates with tiktoken (approximate for non-OpenAI models).
-
-tiktoken downloads its vocabulary file on first use. If that isn't possible
-(offline machine, locked-down server) we fall back to ~4 characters per token
-so the API keeps working instead of failing every request.
-"""
+"""Local token estimates with tiktoken (approximate for non-OpenAI models)."""
 
 import logging
 import math

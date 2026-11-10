@@ -9,12 +9,7 @@ from app.schemas.ingestion import IngestionRequest, IngestionResult
 
 
 class ChatRequest(IngestionRequest):
-    """Same validation as the ingestion request (non-empty, max length, channel).
-
-    Leave `session_id` out to start a new conversation; send the ID returned by
-    the previous reply to continue it.
-    """
-
+    # leave session_id empty to start a new chat
     session_id: UUID | None = None
 
 

@@ -1,11 +1,4 @@
-"""Generates the customer-facing Markdown reply with a plain Groq chat call.
-
-Week 1 used Instructor because we needed strict JSON. Here we want free text
-(Markdown), so we call the Groq SDK directly.
-
-Week 3: earlier turns of the conversation are passed in `history`, so the
-model can answer follow-up questions like "how long will that take?".
-"""
+"""Generates the customer-facing Markdown reply with a plain Groq chat call."""
 
 import time
 from dataclasses import dataclass
@@ -40,10 +33,6 @@ def _client() -> Groq:
 
 
 def build_messages(system_prompt: str, history: list[dict], message: str) -> list[dict]:
-    """system -> earlier turns (oldest first) -> the new user message.
-
-    This list is the model's whole "memory": anything not in it, it doesn't know.
-    """
     return [
         {"role": "system", "content": system_prompt},
         *history,

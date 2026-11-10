@@ -17,7 +17,6 @@ from app.services.injection_guard import detect_injection, detect_pii
 from app.services.llm_service import ClassificationOutcome
 from app.utils.token_counter import count_tokens
 
-# (message, channel, earlier user messages in the same chat) -> outcome
 Classifier = Callable[[str, str, list[str]], ClassificationOutcome]
 
 
@@ -51,7 +50,6 @@ def ingest(
     risk = result.risk
     priority = result.priority
 
-    # Deterministic rules the LLM cannot talk its way out of.
     if detect_injection(request.message):
         risk = _raise_risk(risk, "medium", "prompt_injection", "Message attempts to steer the classifier.")
         priority = priority.model_copy(update={"requires_human": True})

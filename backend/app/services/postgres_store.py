@@ -1,17 +1,4 @@
-"""Chat history stored in Postgres (Supabase in production).
-
-Same methods as the in-memory SessionStore, so the API code doesn't care
-which one it gets. Used automatically when DATABASE_URL is set.
-
-Why a database: Render's free instances restart and sleep, and anything kept
-in process memory is lost when that happens. Postgres keeps the chats.
-
-Connection notes for Supabase:
-- Use the "Session pooler" connection string. The direct connection is
-  IPv6-only, and Render can't reach IPv6 addresses.
-- prepare_threshold=None turns off server-side prepared statements, which
-  connection poolers (pgbouncer / Supavisor) don't always support.
-"""
+"""Chat history stored in Postgres (Supabase in production)."""
 
 import logging
 import uuid
@@ -51,9 +38,6 @@ create table if not exists chat_messages (
 create index if not exists chat_messages_session_idx on chat_messages (session_id, id);
 create index if not exists chat_sessions_last_active_idx on chat_sessions (last_active);
 
--- Supabase exposes the public schema through its REST API. With RLS on and no
--- policies, nobody can read these tables with the public anon key. The backend
--- connects as the postgres role, which is not affected by RLS.
 alter table chat_sessions enable row level security;
 alter table chat_messages enable row level security;
 """
@@ -77,7 +61,6 @@ class PostgresSessionStore:
         ttl_seconds: int = 3600,
         connect_timeout: int = 10,
     ):
-        # Keep whole user+assistant pairs.
         self.max_messages = max_messages - (max_messages % 2)
         self.ttl_seconds = ttl_seconds
         self._schema_ready = False
@@ -89,10 +72,7 @@ class PostgresSessionStore:
             kwargs={"prepare_threshold": None, "connect_timeout": connect_timeout},
             open=False,
         )
-        # Don't block startup if the database is down; requests will report it.
         self._pool.open(wait=False)
-
-    # ---------- connection helpers ----------
 
     @contextmanager
     def _connection(self):
@@ -108,7 +88,6 @@ class PostgresSessionStore:
             raise DatabaseUnavailableError("Database is unavailable") from exc
 
     def _touch(self, conn, session_id: str) -> dict:
-        """Refresh last_active and return the row, or raise if missing/expired."""
         try:
             sid = uuid.UUID(session_id)
         except ValueError as exc:
@@ -130,8 +109,6 @@ class PostgresSessionStore:
             "delete from chat_sessions where last_active < now() - make_interval(secs => %s)",
             (self.ttl_seconds,),
         )
-
-    # ---------- public API (same as SessionStore) ----------
 
     def create(self) -> Session:
         with self._connection() as conn:
@@ -196,7 +173,6 @@ class PostgresSessionStore:
                 """,
                 (sid, assistant_text, Jsonb(assistant_extra or {})),
             )
-            # Keep only the newest max_messages for this session.
             conn.execute(
                 """
                 delete from chat_messages

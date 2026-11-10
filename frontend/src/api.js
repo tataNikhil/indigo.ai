@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || "";
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -7,8 +7,6 @@ export class ApiError extends Error {
   }
 }
 
-// FastAPI returns errors as {detail: "..."} or, for validation errors,
-// {detail: [{msg: "..."}, ...]}. Turn either into one readable sentence.
 function readError(body, status) {
   const detail = body?.detail;
   if (typeof detail === "string") return detail;
@@ -24,7 +22,12 @@ async function request(path, options = {}) {
       ...options,
     });
   } catch {
-    throw new ApiError("Can't reach the backend. Is uvicorn running on port 8000?", 0);
+    throw new ApiError(
+      API_URL
+        ? "Can't reach the server. It may be starting up - wait a minute and try again."
+        : "Can't reach the backend. Is uvicorn running on port 8000?",
+      0
+    );
   }
 
   if (response.status === 204) return null;
@@ -33,7 +36,6 @@ async function request(path, options = {}) {
   return body;
 }
 
-// Leave sessionId empty to start a new conversation; the reply carries the new ID.
 export function sendMessage(message, sessionId, channel = "chat") {
   const payload = { message, channel };
   if (sessionId) payload.session_id = sessionId;
