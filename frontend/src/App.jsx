@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { sendMessage } from "./api.js";
+import { deleteSession, getSession, sendMessage } from "./api.js";
 import MarkdownReply from "./components/MarkdownReply.jsx";
 import AnalysisBadges from "./components/AnalysisBadges.jsx";
 
@@ -10,14 +10,70 @@ const EXAMPLES = [
   "I'm locked out after entering the wrong password 3 times.",
 ];
 
+// Only the session ID is kept in the browser, so a page refresh can reload
+// the same conversation from the backend. The messages themselves live on
+// the server.
+const SESSION_KEY = "indigo.sessionId";
+
+function loadSavedSessionId() {
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionId(id) {
+  try {
+    if (id) localStorage.setItem(SESSION_KEY, id);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // storage blocked (private mode etc.) - the chat still works, just not across reloads
+  }
+}
+
 let nextId = 1;
 
+function fromServer(message) {
+  return {
+    id: nextId++,
+    role: message.role,
+    text: message.content,
+    analysis: message.analysis,
+    meta: message.reply_metadata,
+  };
+}
+
 export default function App() {
+  const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [error, setError] = useState("");
   const bottomRef = useRef(null);
+  const inputRef = useRef(null);
+
+  function rememberSession(id) {
+    setSessionId(id);
+    saveSessionId(id);
+  }
+
+  // On first load, continue the previous conversation if the server still has it.
+  useEffect(() => {
+    const saved = loadSavedSessionId();
+    if (!saved) {
+      setRestoring(false);
+      return;
+    }
+    getSession(saved)
+      .then((session) => {
+        setSessionId(session.session_id);
+        setMessages(session.messages.map(fromServer));
+      })
+      .catch(() => saveSessionId(null)) // expired or server restarted: start fresh
+      .finally(() => setRestoring(false));
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -33,7 +89,8 @@ export default function App() {
     setLoading(true);
 
     try {
-      const data = await sendMessage(message);
+      const data = await sendMessage(message, sessionId);
+      rememberSession(data.session_id);
       setMessages((prev) => [
         ...prev,
         {
@@ -45,9 +102,30 @@ export default function App() {
         },
       ]);
     } catch (err) {
-      setError(err.message);
+      if (err.status === 404) {
+        // The server forgot this chat (expired / restarted). Drop the old ID so
+        // the next message starts a new conversation.
+        rememberSession(null);
+        setError("This conversation has expired. Send your message again to start a new chat.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function newChat() {
+    if (loading) return;
+    const oldId = sessionId;
+    rememberSession(null);
+    setMessages([]);
+    setError("");
+    setInput("");
+    inputRef.current?.focus();
+    if (oldId) {
+      // Free the memory on the server. If it already expired, that's fine.
+      deleteSession(oldId).catch(() => {});
     }
   }
 
@@ -62,16 +140,31 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>
-          Indigo<span>.ai</span>
-        </h1>
-        <p>Intent-based support assistant</p>
+        <div>
+          <h1>
+            Indigo<span>.ai</span>
+          </h1>
+          <p>
+            Intent-based support assistant
+            {sessionId && (
+              <span className="session" title={sessionId}>
+                {" "}
+                · session {sessionId.slice(0, 8)}
+              </span>
+            )}
+          </p>
+        </div>
+        <button className="new-chat" onClick={newChat} disabled={loading || messages.length === 0}>
+          + New chat
+        </button>
       </header>
 
       <main className="chat">
-        {messages.length === 0 && (
+        {restoring && <p className="hint">Loading your conversation...</p>}
+
+        {!restoring && messages.length === 0 && (
           <div className="empty">
-            <p>Try one of these:</p>
+            <p>Try one of these, then ask a follow-up like "how long will that take?"</p>
             {EXAMPLES.map((example) => (
               <button key={example} className="example" onClick={() => submit(example)}>
                 {example}
@@ -87,12 +180,16 @@ export default function App() {
             </div>
           ) : (
             <div key={msg.id} className="bubble assistant">
-              <AnalysisBadges analysis={msg.analysis} />
+              {msg.analysis && <AnalysisBadges analysis={msg.analysis} />}
               <MarkdownReply text={msg.text} />
-              <div className="meta">
-                {msg.meta.model} · {msg.meta.latency_ms} ms
-                {msg.meta.completion_tokens != null && ` · ${msg.meta.completion_tokens} tokens`}
-              </div>
+              {msg.meta && (
+                <div className="meta">
+                  {msg.meta.model} · {msg.meta.latency_ms} ms
+                  {msg.meta.completion_tokens != null && ` · ${msg.meta.completion_tokens} tokens`}
+                  {msg.meta.history_messages_used > 0 &&
+                    ` · remembered ${msg.meta.history_messages_used} earlier messages`}
+                </div>
+              )}
             </div>
           )
         )}
@@ -122,15 +219,16 @@ export default function App() {
         }}
       >
         <textarea
+          ref={inputRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Describe your issue..."
+          placeholder={messages.length ? "Ask a follow-up..." : "Describe your issue..."}
           rows={2}
           maxLength={8000}
-          disabled={loading}
+          disabled={loading || restoring}
         />
-        <button type="submit" disabled={loading || !input.trim()}>
+        <button type="submit" disabled={loading || restoring || !input.trim()}>
           {loading ? "Sending..." : "Send"}
         </button>
       </form>

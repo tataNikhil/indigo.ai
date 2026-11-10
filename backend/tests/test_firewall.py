@@ -28,7 +28,7 @@ def make_outcome(**overrides) -> ClassificationOutcome:
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[get_classifier] = lambda: (lambda message, channel: make_outcome())
+    app.dependency_overrides[get_classifier] = lambda: (lambda message, channel, earlier: make_outcome())
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -82,7 +82,7 @@ def test_batch_uses_root_model(client):
 
 
 def test_llm_failure_returns_502():
-    def broken(message, channel):
+    def broken(message, channel, earlier):
         raise RuntimeError("provider down")
 
     app.dependency_overrides[get_classifier] = lambda: broken
@@ -112,7 +112,7 @@ def test_injection_is_flagged_even_if_llm_is_fooled(message):
         risk={"level": "low", "flags": [], "reason": "Nothing to see."},
         priority={"level": "low", "requires_human": False},
     )
-    app.dependency_overrides[get_classifier] = lambda: (lambda m, c: fooled)
+    app.dependency_overrides[get_classifier] = lambda: (lambda m, c, e: fooled)
     try:
         body = TestClient(app).post("/api/v1/ingest", json={"message": message}).json()
     finally:

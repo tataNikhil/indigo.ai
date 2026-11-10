@@ -11,7 +11,7 @@ from tests.test_firewall import make_outcome
 FAKE_MARKDOWN = "**Sorry about the double debit.**\n\n1. Keep your UTR handy\n2. Wait 5-7 days"
 
 
-def fake_reply(message, analysis):
+def fake_reply(message, analysis, history=None):
     return GeneratedReply(
         markdown=FAKE_MARKDOWN,
         model="fake-model",
@@ -23,7 +23,7 @@ def fake_reply(message, analysis):
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[get_classifier] = lambda: (lambda m, c: make_outcome())
+    app.dependency_overrides[get_classifier] = lambda: (lambda m, c, e: make_outcome())
     app.dependency_overrides[get_reply_generator] = lambda: fake_reply
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -41,12 +41,12 @@ def test_chat_returns_markdown_and_analysis(client):
 def test_reply_generator_receives_the_analysis():
     seen = {}
 
-    def spy(message, analysis):
+    def spy(message, analysis, history):
         seen["message"] = message
         seen["intent"] = analysis.intent
         return fake_reply(message, analysis)
 
-    app.dependency_overrides[get_classifier] = lambda: (lambda m, c: make_outcome())
+    app.dependency_overrides[get_classifier] = lambda: (lambda m, c, e: make_outcome())
     app.dependency_overrides[get_reply_generator] = lambda: spy
     try:
         TestClient(app).post("/api/v1/chat", json={"message": "  refund pls  "})
@@ -61,10 +61,10 @@ def test_chat_rejects_blank_message(client):
 
 
 def test_reply_failure_returns_502():
-    def broken(message, analysis):
+    def broken(message, analysis, history):
         raise RuntimeError("timeout talking to provider")
 
-    app.dependency_overrides[get_classifier] = lambda: (lambda m, c: make_outcome())
+    app.dependency_overrides[get_classifier] = lambda: (lambda m, c, e: make_outcome())
     app.dependency_overrides[get_reply_generator] = lambda: broken
     try:
         response = TestClient(app).post("/api/v1/chat", json={"message": "hello"})
@@ -78,11 +78,11 @@ def test_reply_failure_returns_502():
 def test_classifier_failure_stops_before_reply():
     called = []
 
-    def boom(m, c):
+    def boom(m, c, e):
         raise RuntimeError("down")
 
     app.dependency_overrides[get_classifier] = lambda: boom
-    app.dependency_overrides[get_reply_generator] = lambda: (lambda m, a: called.append(1))
+    app.dependency_overrides[get_reply_generator] = lambda: (lambda m, a, h: called.append(1))
     try:
         response = TestClient(app).post("/api/v1/chat", json={"message": "hello"})
     finally:

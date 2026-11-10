@@ -17,7 +17,8 @@ from app.services.injection_guard import detect_injection, detect_pii
 from app.services.llm_service import ClassificationOutcome
 from app.utils.token_counter import count_tokens
 
-Classifier = Callable[[str, str], ClassificationOutcome]
+# (message, channel, earlier user messages in the same chat) -> outcome
+Classifier = Callable[[str, str, list[str]], ClassificationOutcome]
 
 
 class TokenBudgetExceededError(ValueError):
@@ -33,13 +34,17 @@ def _raise_risk(risk: RiskProfile, minimum: str, flag: str, note: str) -> RiskPr
     return RiskProfile(level=level, flags=[*risk.flags, flag], reason=reason)
 
 
-def ingest(request: IngestionRequest, classifier: Classifier) -> IngestionResult:
+def ingest(
+    request: IngestionRequest,
+    classifier: Classifier,
+    earlier_messages: list[str] | None = None,
+) -> IngestionResult:
     input_tokens = count_tokens(request.message)
     if input_tokens > settings.max_input_tokens:
         raise TokenBudgetExceededError(input_tokens, settings.max_input_tokens)
 
     started = time.perf_counter()
-    outcome = classifier(request.message, request.channel)
+    outcome = classifier(request.message, request.channel, earlier_messages or [])
     latency_ms = int((time.perf_counter() - started) * 1000)
 
     result = outcome.classification

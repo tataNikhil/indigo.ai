@@ -2,6 +2,9 @@
 
 Week 1 used Instructor because we needed strict JSON. Here we want free text
 (Markdown), so we call the Groq SDK directly.
+
+Week 3: earlier turns of the conversation are passed in `history`, so the
+model can answer follow-up questions like "how long will that take?".
 """
 
 import time
@@ -36,7 +39,21 @@ def _client() -> Groq:
     return Groq(api_key=settings.groq_api_key)
 
 
-def generate_reply(message: str, analysis: IngestionResult) -> GeneratedReply:
+def build_messages(system_prompt: str, history: list[dict], message: str) -> list[dict]:
+    """system -> earlier turns (oldest first) -> the new user message.
+
+    This list is the model's whole "memory": anything not in it, it doesn't know.
+    """
+    return [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": message},
+    ]
+
+
+def generate_reply(
+    message: str, analysis: IngestionResult, history: list[dict] | None = None
+) -> GeneratedReply:
     system_prompt = build_system_prompt(
         intent=analysis.intent,
         risk_level=analysis.risk.level,
@@ -52,10 +69,7 @@ def generate_reply(message: str, analysis: IngestionResult) -> GeneratedReply:
         model=settings.groq_model,
         temperature=0.3,
         max_tokens=settings.reply_max_tokens,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ],
+        messages=build_messages(system_prompt, history or [], message),
     )
     latency_ms = int((time.perf_counter() - started) * 1000)
 
