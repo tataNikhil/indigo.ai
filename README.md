@@ -43,3 +43,12 @@ The app runs in production: the React frontend on Vercel, the FastAPI backend on
 and chat history in a Supabase Postgres database, so conversations survive restarts.
 Secrets live in environment variables, CORS only allows the deployed frontend, and the
 app reports clear errors if the database is unreachable.
+
+## Week 5: Movie Recommendation System (ML Engine)
+
+A recommendation engine trained on the MovieLens Latest Small dataset, in the
+`movie-recommendation-system` folder. Ratings are cleaned, split per user into train and
+test sets, and turned into a sparse user-item matrix. Item-based and user-based
+collaborative filtering use cosine similarity to score and rank movies, and new users get
+popular movies instead. The models are evaluated with RMSE, MAE, Precision@10, Recall@10
+and coverage. Training (`train.py`) is kept separate from serving (`recommend.py`).
